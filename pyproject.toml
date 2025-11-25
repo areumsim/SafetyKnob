@@ -1,0 +1,108 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "safetyknob"
+version = "2.0.0"
+description = "Industrial Image Safety Assessment System using Vision Models"
+readme = "README.md"
+authors = [
+    {name = "SafetyKnob Team", email = "team@safetyknob.ai"}
+]
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "transformers>=4.25.0",
+    "timm>=0.9.0",
+    "Pillow>=9.0.0",
+    "opencv-python>=4.5.0",
+    "open_clip_torch>=2.0.0",
+    "sentence-transformers>=2.2.0",
+    "numpy>=1.21.0",
+    "pandas>=1.3.0",
+    "scikit-learn>=1.0.0",
+    "scipy>=1.7.0",
+    "scikit-image>=0.18.0",
+    "matplotlib>=3.4.0",
+    "seaborn>=0.11.0",
+    "plotly>=5.0.0",
+    "umap-learn>=0.5.0",
+    "fastapi>=0.68.0",
+    "uvicorn>=0.15.0",
+    "python-multipart>=0.0.5",
+    "aiofiles>=0.8.0",
+    "tqdm>=4.62.0",
+    "click>=8.0.0",
+    "pyyaml>=5.4.0",
+    "python-dotenv>=0.19.0",
+    "requests>=2.26.0",
+    "pydantic>=1.8.0",
+    "jinja2>=3.0.0",
+    "colorlog>=6.6.0",
+    "psutil>=5.8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-mock>=3.10.0",
+    "pytest-asyncio>=0.20.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "pylint>=2.16.0",
+    "ipdb>=0.13.13",
+    "jupyter>=1.0.0",
+    "notebook>=6.5.0",
+    "pre-commit>=3.0.0",
+]
+
+[project.scripts]
+safetyknob = "main:main"
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/safetyknob"
+"Bug Tracker" = "https://github.com/yourusername/safetyknob/issues"
+"Documentation" = "https://github.com/yourusername/safetyknob/docs"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+safetyknob = ["config/*.json"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

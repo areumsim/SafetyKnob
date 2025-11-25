@@ -1,0 +1,64 @@
+{
+  "system": {
+    "name": "industrial_safety_assessment",
+    "description": "Industrial image safety assessment using pre-trained vision models",
+    "version": "1.0.0"
+  },
+  
+  "models": [
+    {
+      "name": "siglip",
+      "model_type": "siglip",
+      "checkpoint": "google/siglip-so400m-patch14-384",
+      "embedding_dim": 1152,
+      "device": "cuda",
+      "cache_dir": "./data/cache/siglip"
+    }
+  ],
+  
+  "assessment_method": "ensemble",
+  "ensemble_strategy": "weighted_vote",
+  
+  "safety": {
+    "dimensions": {
+      "fall_hazard": {
+        "weight": 1.0,
+        "description": "추락 위험"
+      },
+      "collision_risk": {
+        "weight": 1.0,
+        "description": "충돌 위험"
+      },
+      "equipment_hazard": {
+        "weight": 1.0,
+        "description": "장비 위험"
+      },
+      "environmental_risk": {
+        "weight": 0.8,
+        "description": "환경적 위험"
+      },
+      "protective_gear": {
+        "weight": 0.8,
+        "description": "보호구 착용"
+      }
+    },
+    "safety_threshold": 0.5,
+    "confidence_threshold": 0.7,
+    
+    "_comment": "안전성 차원을 추가하거나 변경하려면 dimensions에 새 항목을 추가하세요",
+    "_example_custom_dimensions": {
+      "fire_hazard": {
+        "weight": 1.2,
+        "description": "화재 위험"
+      },
+      "chemical_exposure": {
+        "weight": 1.0,
+        "description": "화학물질 노출"
+      },
+      "electrical_hazard": {
+        "weight": 0.9,
+        "description": "전기 위험"
+      }
+    }
+  }
+}
