@@ -1,4 +1,6 @@
-# SafetyKnob - Industrial Image Safety Assessment System
+# SafetyKnob
+
+**Industrial Safety Assessment System using Pre-trained Vision Models**
 
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/pytorch-2.0+-red.svg)](https://pytorch.org/)
@@ -109,8 +111,8 @@ SafetyKnob은 세 가지 핵심 지표로 모델 성능을 측정합니다:
 ### 설치 과정
 ```bash
 # 1. 저장소 클론
-git clone https://github.com/yourusername/safetyknob.git
-cd safetyknob
+git clone https://github.com/areumsim/SafetyKnob.git
+cd SafetyKnob
 
 # 2. 가상환경 생성 및 활성화
 python -m venv venv
@@ -349,16 +351,16 @@ python scripts/verify_dataset.py --data-dir data/processed/
 - **인용**:
   ```bibtex
   @software{safetyknob2025,
-    title={SafetyKnob: Industrial Image Safety Assessment System},
-    author={Your Team},
+    title={SafetyKnob: Industrial Safety Assessment System},
+    author={Areum Sim},
     year={2025},
-    url={https://github.com/yourusername/safetyknob}
+    url={https://github.com/areumsim/SafetyKnob}
   }
   ```
 
 ### 연락처
-- **Issues**: [GitHub Issues](https://github.com/yourusername/safetyknob/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/safetyknob/discussions)
+- **Issues**: [GitHub Issues](https://github.com/areumsim/SafetyKnob/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/areumsim/SafetyKnob/discussions)
 
 ---
 
