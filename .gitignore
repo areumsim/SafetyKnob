@@ -66,3 +66,8 @@ temp/
 # Large model files
 *.bin
 *.safetensors
+
+# Large data directories
+data_scenario/
+data_caution_excluded/
+data_temporal/
