@@ -54,39 +54,73 @@ class BaselineImageDataset(Dataset):
 class BaselineCNN(nn.Module):
     """Wrapper for baseline CNN models with binary classification head"""
 
-    def __init__(self, model_name='resnet50', pretrained=True):
+    def __init__(self, model_name='resnet50', pretrained=True, frozen=False):
         super().__init__()
         self.model_name = model_name
+        self.frozen = frozen
 
         if model_name == 'resnet50':
             self.backbone = models.resnet50(pretrained=pretrained)
-            # Replace final FC layer for binary classification
-            num_features = self.backbone.fc.in_features
-            self.backbone.fc = nn.Sequential(
-                nn.Linear(num_features, 512),
-                nn.ReLU(),
-                nn.Dropout(0.3),
-                nn.Linear(512, 1),
-                nn.Sigmoid()
-            )
+            num_features = self.backbone.fc.in_features  # 2048
+
+            if frozen:
+                # Freeze entire backbone
+                for param in self.backbone.parameters():
+                    param.requires_grad = False
+                # Replace FC with identity to extract penultimate features
+                self.backbone.fc = nn.Identity()
+                # Separate probe head (same architecture as finetuned for fair comparison)
+                self.probe_head = nn.Sequential(
+                    nn.Linear(num_features, 512),
+                    nn.ReLU(),
+                    nn.Dropout(0.3),
+                    nn.Linear(512, 1),
+                    nn.Sigmoid()
+                )
+            else:
+                # Replace final FC layer for binary classification (original behavior)
+                self.backbone.fc = nn.Sequential(
+                    nn.Linear(num_features, 512),
+                    nn.ReLU(),
+                    nn.Dropout(0.3),
+                    nn.Linear(512, 1),
+                    nn.Sigmoid()
+                )
 
         elif model_name == 'efficientnet_b0':
             self.backbone = models.efficientnet_b0(pretrained=pretrained)
-            # Replace final classifier for binary classification
             num_features = self.backbone.classifier[1].in_features
-            self.backbone.classifier = nn.Sequential(
-                nn.Dropout(0.3),
-                nn.Linear(num_features, 512),
-                nn.ReLU(),
-                nn.Dropout(0.2),
-                nn.Linear(512, 1),
-                nn.Sigmoid()
-            )
+
+            if frozen:
+                for param in self.backbone.parameters():
+                    param.requires_grad = False
+                self.backbone.classifier = nn.Identity()
+                self.probe_head = nn.Sequential(
+                    nn.Dropout(0.3),
+                    nn.Linear(num_features, 512),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(512, 1),
+                    nn.Sigmoid()
+                )
+            else:
+                self.backbone.classifier = nn.Sequential(
+                    nn.Dropout(0.3),
+                    nn.Linear(num_features, 512),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(512, 1),
+                    nn.Sigmoid()
+                )
 
         else:
             raise ValueError(f"Unknown model: {model_name}")
 
     def forward(self, x):
+        if self.frozen:
+            with torch.no_grad():
+                features = self.backbone(x)
+            return self.probe_head(features).squeeze()
         return self.backbone(x).squeeze()
 
 
@@ -162,7 +196,7 @@ def main():
     parser.add_argument('--model', type=str, required=True,
                        choices=['resnet50', 'efficientnet_b0'],
                        help='Baseline model to train')
-    parser.add_argument('--data-dir', type=str, default='/workspace/arsim/EmoKnob/data',
+    parser.add_argument('--data-dir', type=str, default='data',
                        help='Data directory')
     parser.add_argument('--output', type=str, required=True,
                        help='Output directory for checkpoints and results')
@@ -174,6 +208,8 @@ def main():
                        help='Learning rate')
     parser.add_argument('--pretrained', action='store_true', default=True,
                        help='Use ImageNet pretrained weights')
+    parser.add_argument('--frozen', action='store_true', default=False,
+                       help='Freeze backbone and train only probe head')
     parser.add_argument('--seed', type=int, default=42,
                        help='Random seed')
 
@@ -193,6 +229,7 @@ def main():
     print(f"Output: {output_path}")
     print(f"Epochs: {args.epochs}, Batch: {args.batch_size}, LR: {args.lr}")
     print(f"Pretrained: {args.pretrained}")
+    print(f"Frozen backbone: {args.frozen}")
 
     # Data transformations (standard ImageNet preprocessing)
     train_transform = transforms.Compose([
@@ -254,7 +291,7 @@ def main():
 
     # Create model
     print(f"\nCreating {args.model} model...")
-    model = BaselineCNN(model_name=args.model, pretrained=args.pretrained)
+    model = BaselineCNN(model_name=args.model, pretrained=args.pretrained, frozen=args.frozen)
     model = model.to(device)
 
     total_params = sum(p.numel() for p in model.parameters())
@@ -264,7 +301,9 @@ def main():
     print(f"  Trainable parameters: {trainable_params:,}")
 
     criterion = nn.BCELoss()
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
+    # Only optimize trainable parameters
+    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()),
+                           lr=args.lr, weight_decay=0.01)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     # Training
@@ -330,8 +369,9 @@ def main():
         'model': args.model,
         'dataset': 'danger_al',
         'task': 'binary_classification',
-        'model_type': 'baseline_cnn',
+        'model_type': 'baseline_cnn_frozen' if args.frozen else 'baseline_cnn',
         'pretrained': args.pretrained,
+        'frozen': args.frozen,
         'total_parameters': total_params,
         'trainable_parameters': trainable_params,
         'training_time_seconds': training_time,

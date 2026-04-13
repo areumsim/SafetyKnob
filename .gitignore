@@ -27,9 +27,23 @@ ENV/
 
 # Data directories
 data/
+data_scenario/
+data_temporal/
+data_caution_excluded/
+embeddings/
+*.zip
 *.jpg
 *.png
 *.jpeg
+
+# Large raw datasets — keep folder placeholders, ignore contents
+data_scenario_v2/*
+!data_scenario_v2/.gitkeep
+data_yolo_cls/*
+!data_yolo_cls/.gitkeep
+data_construction_ppe/*
+!data_construction_ppe/.gitkeep
+data_sh17_repo/
 
 # Model checkpoints and results
 results/

@@ -1,7 +1,7 @@
 # EXPERIMENT_PROTOCOL.md
 
-**Version**: 1.0
-**Last Updated**: 2025-10-01
+**Version**: 1.4
+**Last Updated**: 2026-04-06
 **Status**: Active Experimental Protocol
 
 본 문서는 SafetyKnob 프로젝트의 실험 프로토콜을 정의합니다. 모든 실험은 이 프로토콜을 따라 수행되어야 하며, 재현성과 비교 가능성을 보장하기 위해 표준화된 절차를 따릅니다.
@@ -128,7 +128,7 @@ set_seed(42)
 # Manual download required (requires AI Hub account)
 
 # Step 2: Extract and organize
-cd /workspace/arsim/SafetyKnob
+cd /path/to/EmoKnob
 mkdir -p data/raw
 unzip Construction_Safety_Images.zip -d data/raw/
 
@@ -1581,7 +1581,170 @@ if __name__ == '__main__':
 
 ---
 
+## 보완 실험 프로토콜 (2026-03 추가)
+
+### Experiment A: ResNet50-Frozen Baseline (공정 비교)
+
+**목적**: Foundation model의 representation 품질이 ImageNet-pretrained CNN보다 우수함을 입증
+
+**실행 방법**:
+```bash
+# Scenario split에서 ResNet50-Frozen 실험
+python experiments/train_baseline.py \
+  --model resnet50 --frozen \
+  --data-dir data_scenario/ \
+  --output results/scenario/baseline_frozen/ \
+  --epochs 30 --lr 1e-3
+
+# Temporal split에서 ResNet50-Frozen/Finetuned 실험
+python experiments/train_baseline.py \
+  --model resnet50 --frozen \
+  --data-dir data_temporal/ \
+  --output results/temporal/baseline_frozen/
+
+python experiments/train_baseline.py \
+  --model resnet50 \
+  --data-dir data_temporal/ \
+  --output results/temporal/baseline_finetuned/
+```
+
+**비교표 (실측)**:
+
+| 모델 | Mode | Trainable Params | Scenario F1 | Temporal F1 |
+|------|------|-----------------|-------------|-------------|
+| ResNet50 | Frozen | 1,049,601 | 78.42% | 57.33% |
+| ResNet50 | Finetuned | 24.6M | 95.49% | N/A (미실행) |
+| SigLIP | Frozen+2layer | 656,129 | 96.13% | 68.08% |
+
+**판정**: Foundation model(SigLIP) >> ResNet50-Frozen (+17.71%p). Frozen representation 품질 격차 명확.
+
+### Embedding Extraction Workflow
+
+**목적**: 모델 임베딩을 사전 추출하여 probe 실험을 초 단위로 반복 실행
+
+**실행 방법**:
+```bash
+# 1. Scenario split 임베딩 추출 (모델당 ~30분, GPU 1개)
+for model in siglip clip dinov2; do
+  python scripts/extract_embeddings.py \
+    --model $model \
+    --data-dir data_scenario \
+    --output embeddings/scenario/$model
+done
+
+# 2. Temporal split 임베딩 추출
+for model in siglip clip dinov2; do
+  python scripts/extract_embeddings.py \
+    --model $model \
+    --data-dir data_temporal \
+    --output embeddings/temporal/$model
+done
+
+# 3. 캐시 임베딩 기반 probe 학습 (~3초/실험)
+python experiments/train_from_embeddings.py \
+  --model siglip \
+  --embeddings-dir embeddings/scenario/siglip \
+  --probe-depth 2layer \
+  --output results/scenario/siglip_2layer
+```
+
+**출력 구조**:
+```
+embeddings/
+├── scenario/{siglip,clip,dinov2}/
+│   ├── train_embeddings.pt   # (N, D) 텐서 + filenames
+│   ├── train_labels.pt       # labels dict
+│   ├── val_embeddings.pt
+│   ├── val_labels.pt
+│   ├── test_embeddings.pt
+│   └── test_labels.pt
+└── temporal/{siglip,clip,dinov2}/
+    └── (동일 구조)
+```
+
+**시간 절감**: SigLIP 기준 11시간/실험 → 3초/실험 (임베딩 추출 1회 30분 + probe 학습 3초 × N실험)
+
+### Experiment B: Probe Depth Ablation (선형 분리 검증)
+
+**목적**: RESEARCH_METHODOLOGY.md에 명시된 "linear probe baseline" + "compare to non-linear MLP" 검증
+
+**실행 방법**:
+```bash
+for depth in linear 1layer 2layer; do
+  python experiments/train_binary.py \
+    --model siglip \
+    --probe-depth $depth \
+    --data-dir data_scenario/ \
+    --output results/scenario/siglip_${depth}/ \
+    --epochs 20
+done
+```
+
+**판정 기준**:
+- Linear F1 vs 2-layer F1 차이 < 3%p → "선형 분리 가능" 확인
+- Linear F1 vs 2-layer F1 차이 > 5%p → 비선형 특성 중요, 주장 수정 필요
+
+### Experiment C: Temporal Ensemble (RQ2 보완)
+
+**목적**: Distribution shift 하에서 앙상블의 강건성 검증
+
+**실행 방법**:
+```bash
+python scripts/run_ensemble_binary.py \
+  --data-dir data_temporal/ \
+  --results-dir results/temporal/binary/
+```
+
+### Experiment D: 5D Independent vs Multi-task (RQ3 검증)
+
+**목적**: Shared feature extractor의 positive transfer 여부 확인
+
+**실행 방법**:
+```bash
+for cat in A B C D E; do
+  python experiments/train_binary.py \
+    --model siglip \
+    --category $cat \
+    --data-dir data_scenario/ \
+    --output results/scenario/siglip_independent_${cat}/
+done
+```
+
+**비교**: 각 카테고리별 independent F1 vs multi-task 모델의 해당 차원 F1
+
+---
+
 ## 변경 이력
+
+- **v1.3** (2026-03-24): Multi-seed 검증, DANN, Scaling curve, Ensemble ablation 결과 추가
+  - 전체 실험 5-seed 반복 (mean±std 제공)
+  - DANN domain adaptation: ~~99.24% (무효화, 데이터 누출)~~ → clean 65.28% (효과 없음). LoRA: 77.77%
+  - Data scaling curve: 10%~100% 5단계
+  - Ensemble 2-model ablation: SigLIP+DINOv2 최적
+  - Per-category temporal analysis: 카테고리별 shift 분석
+
+- **v1.2** (2026-03-24): 실험 결과 반영 및 임베딩 워크플로우 추가
+  - Experiment A: ResNet50-Frozen 실측값 반영 (Scenario 78.42%, Temporal 57.33%)
+  - 임베딩 사전추출 워크플로우 섹션 추가
+  - SigLIP Scenario F1 95.73% → 96.13% (2-layer probe 정정)
+
+- **v1.4** (2026-04-06): W1-W6 Ablation Analysis 프로토콜 추가
+  - LoRA Rank Ablation: r={0,4,8,16,32} × seed=42 × 5 epochs
+    - `--lora-r 0` (head-only baseline), `--save-epoch-metrics`, `--save-checkpoints`, `--augment` flags 추가
+    - `--num-workers 2`로 DataLoader 병렬화, `PYTHONUNBUFFERED=1`로 stdout 버퍼링 해소
+  - Augmentation 2×2: (r=0/r=16) × (NoAug/Aug) — pixel aug vs backbone 적응 비교
+  - Per-Category Analysis: 체크포인트 기반 추론, 카테고리별 F1, MMD 상관 분석
+  - PPE Bootstrap CI: BCa bootstrap 95% CI, Wilson CI (n=141), negative transfer 분석
+  - 실행 환경: 2× NVIDIA RTX 4090 (24GB), GPU 병렬 실행
+  - 결과: `results/lora_rank_ablation/`, `results/augmentation_ablation/`, `results/lora_per_category_analysis/`, `results/bootstrap_ci_analysis/`
+
+- **v1.1** (2026-03-20): 보완 실험 프로토콜 추가
+  - Experiment A: ResNet50-Frozen baseline (공정 비교)
+  - Experiment B: Probe depth ablation (선형 분리 검증)
+  - Experiment C: Temporal ensemble (RQ2 보완)
+  - Experiment D: 5D independent vs multi-task (RQ3 검증)
+  - `train_baseline.py`에 `--frozen` 옵션, `train_binary.py`에 `--probe-depth`/`--category` 옵션 추가
+  - `run_ensemble_binary.py`에 `--data-dir`/`--results-dir` 옵션 추가
 
 - **v1.0** (2025-10-01): 초기 실험 프로토콜 작성
   - 4개 핵심 실험 정의 (Single Model, Ensemble, Ablation, Threshold)

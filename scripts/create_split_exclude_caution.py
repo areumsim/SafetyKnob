@@ -32,8 +32,8 @@ def get_safety_label_from_class(class_name):
 def main():
     set_seed(42)
 
-    source_dir = Path('/workspace/data1/arsim/danger_al')
-    output_dir = Path('/workspace/arsim/EmoKnob/data_caution_excluded')
+    source_dir = Path('data/raw/danger_al')
+    output_dir = Path('data_caution_excluded')
 
     print("=" * 70)
     print("SPLIT CREATION EXCLUDING CAUTION (safe/danger only)")

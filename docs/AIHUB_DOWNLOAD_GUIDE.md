@@ -59,10 +59,10 @@ SafetyKnob 프로젝트의 기존 실험을 재현하기 위해 AI Hub "Construc
 cd ~/Downloads
 
 # 프로젝트 data/raw/ 디렉토리로 이동
-mv Construction_Safety_*.zip /workspace/arsim/EmoKnob/data/raw/
+mv Construction_Safety_*.zip <프로젝트경로>/data/raw/
 
 # 압축 해제
-cd /workspace/arsim/EmoKnob/data/raw/
+cd <프로젝트경로>/data/raw/
 unzip Construction_Safety_Images.zip
 
 # 결과 확인
@@ -82,7 +82,7 @@ ls -lh
 압축 해제 후 전처리 스크립트 실행:
 
 ```bash
-cd /workspace/arsim/EmoKnob
+cd <프로젝트경로>
 
 # 전처리 스크립트 실행
 python scripts/prepare_dataset.py \
@@ -192,12 +192,11 @@ python experiments/validate_checkpoint.py \
 
 ```bash
 # danger_al 데이터로 먼저 실험
-# (현재 /workspace/data1/arsim/danger_al에 위치)
 
 # Binary classification으로 재훈련
 python experiments/train_standalone.py \
   --model siglip \
-  --data-dir /workspace/arsim/EmoKnob/data \
+  --data-dir data \
   --binary-only
 
 # Phase 2로 진행

@@ -9,7 +9,7 @@
 
 ### ❌ 데이터 부재
 
-프로젝트 디렉토리 `/workspace/arsim/EmoKnob/data/`가 **비어있습니다**.
+프로젝트 디렉토리 `data/`가 **비어있습니다**.
 
 ```bash
 $ ls -la data/

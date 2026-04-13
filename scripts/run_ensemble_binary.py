@@ -17,15 +17,27 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tqdm import tqdm
 from PIL import Image
-from transformers import AutoProcessor, AutoModel, CLIPProcessor, CLIPModel
+from transformers import CLIPProcessor, CLIPModel
 
 
-# ========== Embedders ==========
+# ========== Embedders (transformers 5.x compatible) ==========
+def _to_tensor(output):
+    """Extract tensor from model output."""
+    if isinstance(output, torch.Tensor):
+        return output
+    if hasattr(output, 'pooler_output') and output.pooler_output is not None:
+        return output.pooler_output
+    if hasattr(output, 'image_embeds'):
+        return output.image_embeds
+    raise ValueError(f"Cannot extract tensor from {type(output)}")
+
+
 class SigLIPEmbedder:
-    def __init__(self, model_name="google/siglip-so400m-patch14-384", device="cuda"):
+    def __init__(self, device="cuda"):
+        from transformers import SiglipImageProcessor, SiglipVisionModel
         self.device = device
-        self.model = AutoModel.from_pretrained(model_name).to(device)
-        self.processor = AutoProcessor.from_pretrained(model_name)
+        self.model = SiglipVisionModel.from_pretrained("google/siglip-so400m-patch14-384").to(device)
+        self.processor = SiglipImageProcessor.from_pretrained("google/siglip-so400m-patch14-384")
         self.model.eval()
         self.embedding_dim = 1152
 
@@ -34,15 +46,15 @@ class SigLIPEmbedder:
         if isinstance(image, str):
             image = Image.open(image).convert("RGB")
         inputs = self.processor(images=image, return_tensors="pt").to(self.device)
-        outputs = self.model.get_image_features(**inputs)
-        return outputs
+        outputs = self.model(**inputs)
+        return outputs.pooler_output
 
 
 class CLIPEmbedder:
-    def __init__(self, model_name="openai/clip-vit-large-patch14", device="cuda"):
+    def __init__(self, device="cuda"):
         self.device = device
-        self.model = CLIPModel.from_pretrained(model_name).to(device)
-        self.processor = CLIPProcessor.from_pretrained(model_name)
+        self.model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14").to(device)
+        self.processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
         self.model.eval()
         self.embedding_dim = 768
 
@@ -52,14 +64,15 @@ class CLIPEmbedder:
             image = Image.open(image).convert("RGB")
         inputs = self.processor(images=image, return_tensors="pt").to(self.device)
         outputs = self.model.get_image_features(**inputs)
-        return outputs
+        return _to_tensor(outputs)
 
 
 class DINOv2Embedder:
-    def __init__(self, model_name="facebook/dinov2-large", device="cuda"):
+    def __init__(self, device="cuda"):
+        from transformers import AutoImageProcessor, Dinov2Model
         self.device = device
-        self.model = AutoModel.from_pretrained(model_name).to(device)
-        self.processor = AutoProcessor.from_pretrained(model_name)
+        self.model = Dinov2Model.from_pretrained("facebook/dinov2-large").to(device)
+        self.processor = AutoImageProcessor.from_pretrained("facebook/dinov2-large")
         self.model.eval()
         self.embedding_dim = 1024
 
@@ -72,33 +85,69 @@ class DINOv2Embedder:
         return outputs.mean(dim=1)
 
 
-# Binary-only SafetyClassifier architecture
+# Binary-only SafetyClassifier architecture (synced with train_binary.py)
 class BinarySafetyClassifier(nn.Module):
-    """Binary-only safety classifier (no dimension heads)"""
+    """Binary-only safety classifier (no dimension heads)
 
-    def __init__(self, embedding_dim, hidden_dim=512):
+    Args:
+        embedding_dim: Input embedding dimension
+        hidden_dim: Hidden layer dimension
+        probe_depth: 'linear', '1layer', or '2layer'
+    """
+
+    def __init__(self, embedding_dim, hidden_dim=512, probe_depth='2layer'):
         super().__init__()
+        self.probe_depth = probe_depth
 
-        # Feature extractor
-        self.feature_extractor = nn.Sequential(
-            nn.Linear(embedding_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.3)
-        )
-
-        # Overall safety head
-        self.safety_head = nn.Sequential(
-            nn.Linear(hidden_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 1),
-            nn.Sigmoid()
-        )
+        if probe_depth == 'linear':
+            self.classifier = nn.Sequential(
+                nn.Linear(embedding_dim, 1),
+                nn.Sigmoid()
+            )
+        elif probe_depth == '1layer':
+            self.classifier = nn.Sequential(
+                nn.Linear(embedding_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(hidden_dim, 1),
+                nn.Sigmoid()
+            )
+        elif probe_depth == '2layer':
+            self.classifier = nn.Sequential(
+                nn.Linear(embedding_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(hidden_dim, 128),
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(128, 1),
+                nn.Sigmoid()
+            )
+        else:
+            raise ValueError(f"Unknown probe_depth: {probe_depth}")
 
     def forward(self, x):
-        features = self.feature_extractor(x)
-        overall_safety = self.safety_head(features)
-        return overall_safety
+        return self.classifier(x).squeeze()
+
+    @staticmethod
+    def convert_old_state_dict(state_dict):
+        """Convert old-format state dict (feature_extractor/safety_head) to new (classifier)."""
+        if any(k.startswith('classifier.') for k in state_dict):
+            return state_dict, '2layer'  # already new format
+
+        key_map = {
+            'feature_extractor.0.weight': 'classifier.0.weight',
+            'feature_extractor.0.bias': 'classifier.0.bias',
+            'safety_head.0.weight': 'classifier.3.weight',
+            'safety_head.0.bias': 'classifier.3.bias',
+            'safety_head.3.weight': 'classifier.6.weight',
+            'safety_head.3.bias': 'classifier.6.bias',
+        }
+        new_sd = {}
+        for old_key, new_key in key_map.items():
+            if old_key in state_dict:
+                new_sd[new_key] = state_dict[old_key]
+        return new_sd, '2layer'
 
 
 def load_test_dataset(data_dir: Path, labels_file: Path):
@@ -124,7 +173,7 @@ def load_test_dataset(data_dir: Path, labels_file: Path):
 
 
 def load_model(model_name: str, checkpoint_path: Path, device):
-    """Load embedder and classifier"""
+    """Load embedder and classifier (handles both old and new checkpoint formats)"""
     print(f"  Loading {model_name}...")
 
     # Load checkpoint
@@ -134,20 +183,28 @@ def load_model(model_name: str, checkpoint_path: Path, device):
     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
         state_dict = checkpoint['model_state_dict']
         embedding_dim = checkpoint.get('embedding_dim', None)
+        probe_depth = checkpoint.get('probe_depth', None)
     else:
         state_dict = checkpoint
         embedding_dim = None
+        probe_depth = None
 
-    # Detect embedding_dim from checkpoint
-    if embedding_dim is None and 'feature_extractor.0.weight' in state_dict:
-        embedding_dim = state_dict['feature_extractor.0.weight'].shape[1]
+    # Auto-convert old format and detect probe_depth
+    state_dict, detected_depth = BinarySafetyClassifier.convert_old_state_dict(state_dict)
+    if probe_depth is None:
+        probe_depth = detected_depth
 
-    print(f"    Detected embedding_dim: {embedding_dim}")
+    # Detect embedding_dim from state dict
+    if embedding_dim is None and 'classifier.0.weight' in state_dict:
+        embedding_dim = state_dict['classifier.0.weight'].shape[1]
+
+    print(f"    Detected embedding_dim: {embedding_dim}, probe_depth: {probe_depth}")
 
     # Create classifier and load weights
     classifier = BinarySafetyClassifier(
         embedding_dim=embedding_dim,
-        hidden_dim=512
+        hidden_dim=512,
+        probe_depth=probe_depth
     ).to(device)
     classifier.load_state_dict(state_dict)
     classifier.eval()
@@ -284,21 +341,39 @@ def print_results(results: dict):
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Binary Ensemble Experiment')
+    parser.add_argument('--data-dir', type=str, default=None,
+                       help='Data directory (default: project_root/data)')
+    parser.add_argument('--results-dir', type=str, default=None,
+                       help='Results directory containing model checkpoints (default: project_root/results/danger_al)')
+    parser.add_argument('--output-dir', type=str, default=None,
+                       help='Output directory for ensemble results')
+    args = parser.parse_args()
+
     print("="*60)
     print("BINARY ENSEMBLE EXPERIMENT - DANGER_AL")
     print("="*60)
 
     # Paths
     project_root = Path(__file__).parent.parent
-    data_dir = project_root / 'data'
+    data_dir = Path(args.data_dir) if args.data_dir else project_root / 'data'
     labels_file = data_dir / 'labels.json'
-    model_dir = project_root / 'results' / 'danger_al'
-    output_dir = project_root / 'results' / 'danger_al' / 'ensemble'
+    model_dir = Path(args.results_dir) if args.results_dir else project_root / 'results' / 'danger_al'
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+    else:
+        output_dir = model_dir / 'ensemble'
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"\nData dir: {data_dir}")
+    print(f"Model dir: {model_dir}")
+    print(f"Output dir: {output_dir}")
 
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"\nDevice: {device}")
+    print(f"Device: {device}")
 
     # Models to use
     model_names = []

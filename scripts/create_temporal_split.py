@@ -66,6 +66,7 @@ def main():
 
     # Create target directories
     (target_dir / 'train').mkdir(parents=True, exist_ok=True)
+    (target_dir / 'val').mkdir(parents=True, exist_ok=True)
     (target_dir / 'test').mkdir(parents=True, exist_ok=True)
 
     # Load labels
@@ -125,109 +126,129 @@ def main():
     print("  Train: 2022-06 to 2022-09")
     print("  Test:  2022-10 to 2022-11")
 
-    train_labels = {}
-    test_labels = {}
-    train_labels_5d = {}
-    test_labels_5d = {}
-
-    stats = {
-        'train': {'total': 0, 'danger': 0, 'safe': 0, 'caution': 0},
-        'test': {'total': 0, 'danger': 0, 'safe': 0, 'caution': 0}
-    }
-
+    # First pass: collect train and test candidates
+    train_candidates = []  # (img_path, filename, source_file)
+    test_candidates = []
     skipped = 0
 
     for img_path, (year, month) in file_dates.items():
-        # Get original filename
         filename = img_path.split('/')[-1]
 
-        # Determine split
         if 6 <= month <= 9:
-            split = 'train'
+            dest = 'train'
         elif 10 <= month <= 11:
-            split = 'test'
+            dest = 'test'
         else:
-            # Skip other months (if any)
             skipped += 1
             continue
 
-        # Get source file path (from original data_scenario)
-        # img_path is like "train/H-220927_A35_N-07_005_0061.jpg"
-        source_subdir = img_path.split('/')[0]  # train, val, or test
+        source_subdir = img_path.split('/')[0]
         source_file = source_dir / source_subdir / filename
 
         if not source_file.exists():
             print(f"Warning: Source file not found: {source_file}")
             continue
 
-        # Copy to new split
-        target_file = target_dir / split / filename
-        shutil.copy2(source_file, target_file)
-
-        # Store labels with new path
-        new_path = f"{split}/{filename}"
-
-        # Binary labels
-        if split == 'train':
-            train_labels[new_path] = all_labels[img_path]
+        if dest == 'train':
+            train_candidates.append((img_path, filename, source_file))
         else:
-            test_labels[new_path] = all_labels[img_path]
+            test_candidates.append((img_path, filename, source_file))
 
-        # 5D labels
-        if img_path in all_labels_5d:
-            if split == 'train':
-                train_labels_5d[new_path] = all_labels_5d[img_path]
-            else:
-                test_labels_5d[new_path] = all_labels_5d[img_path]
+    # Split train candidates into train + val (stratified 85/15)
+    import random
+    random.seed(42)
 
-        # Update stats
-        class_label = all_labels[img_path]['class']
-        stats[split]['total'] += 1
-        stats[split][class_label] += 1
+    # Group by class for stratified split
+    from collections import defaultdict as dd
+    train_by_class = dd(list)
+    for item in train_candidates:
+        img_path = item[0]
+        cls = all_labels[img_path]['class']
+        train_by_class[cls].append(item)
+
+    val_candidates = []
+    final_train = []
+
+    for cls, items in train_by_class.items():
+        random.shuffle(items)
+        n_val = max(1, int(len(items) * 0.15))
+        val_candidates.extend(items[:n_val])
+        final_train.extend(items[n_val:])
+
+    train_labels = {}
+    val_labels = {}
+    test_labels = {}
+    train_labels_5d = {}
+    val_labels_5d = {}
+    test_labels_5d = {}
+
+    stats = {
+        'train': {'total': 0, 'danger': 0, 'safe': 0, 'caution': 0},
+        'val': {'total': 0, 'danger': 0, 'safe': 0, 'caution': 0},
+        'test': {'total': 0, 'danger': 0, 'safe': 0, 'caution': 0}
+    }
+
+    def process_split(candidates, split_name):
+        labels_out = {}
+        labels_5d_out = {}
+        for img_path, filename, source_file in candidates:
+            target_file = target_dir / split_name / filename
+            shutil.copy2(source_file, target_file)
+
+            new_path = f"{split_name}/{filename}"
+            labels_out[new_path] = all_labels[img_path]
+
+            if img_path in all_labels_5d:
+                labels_5d_out[new_path] = all_labels_5d[img_path]
+
+            class_label = all_labels[img_path]['class']
+            stats[split_name]['total'] += 1
+            stats[split_name][class_label] += 1
+
+        return labels_out, labels_5d_out
+
+    train_labels, train_labels_5d = process_split(final_train, 'train')
+    val_labels, val_labels_5d = process_split(val_candidates, 'val')
+    test_labels, test_labels_5d = process_split(test_candidates, 'test')
 
     # Print split statistics
     print("\n" + "=" * 60)
     print("Split Statistics")
     print("=" * 60)
 
-    for split in ['train', 'test']:
+    for split in ['train', 'val', 'test']:
         s = stats[split]
         print(f"\n{split.upper()}:")
         print(f"  Total:   {s['total']:6d} images")
-        print(f"  Danger:  {s['danger']:6d} ({s['danger']/s['total']*100:.1f}%)")
-        print(f"  Safe:    {s['safe']:6d} ({s['safe']/s['total']*100:.1f}%)")
-        print(f"  Caution: {s['caution']:6d} ({s['caution']/s['total']*100:.1f}%)")
+        if s['total'] > 0:
+            print(f"  Danger:  {s['danger']:6d} ({s['danger']/s['total']*100:.1f}%)")
+            print(f"  Safe:    {s['safe']:6d} ({s['safe']/s['total']*100:.1f}%)")
+            print(f"  Caution: {s['caution']:6d} ({s['caution']/s['total']*100:.1f}%)")
 
     if skipped > 0:
         print(f"\nSkipped: {skipped} images (outside 06-11 range)")
 
-    # Save binary labels
-    train_labels_file = target_dir / 'labels.json'
-    test_labels_file = target_dir / 'test_labels.json'
-
-    # Combine train+test for compatibility with existing code
-    combined_labels = {**train_labels, **test_labels}
-
-    with open(train_labels_file, 'w') as f:
+    # Save binary labels (combined for compatibility with existing code)
+    combined_labels = {**train_labels, **val_labels, **test_labels}
+    with open(target_dir / 'labels.json', 'w') as f:
         json.dump(combined_labels, f, indent=2)
 
-    print(f"\n✅ Binary labels saved to {train_labels_file}")
+    print(f"\n✅ Binary labels saved to {target_dir / 'labels.json'}")
 
     # Save 5D labels
-    train_labels_5d_file = target_dir / 'labels_5d.json'
-    combined_labels_5d = {**train_labels_5d, **test_labels_5d}
-
-    with open(train_labels_5d_file, 'w') as f:
+    combined_labels_5d = {**train_labels_5d, **val_labels_5d, **test_labels_5d}
+    with open(target_dir / 'labels_5d.json', 'w') as f:
         json.dump(combined_labels_5d, f, indent=2)
 
-    print(f"✅ 5D labels saved to {train_labels_5d_file}")
+    print(f"✅ 5D labels saved to {target_dir / 'labels_5d.json'}")
 
     # Save statistics
     stats_file = target_dir / 'temporal_split_stats.json'
     with open(stats_file, 'w') as f:
         json.dump({
             'split_strategy': {
-                'train': '2022-06 to 2022-09',
+                'train': '2022-06 to 2022-09 (85%)',
+                'val': '2022-06 to 2022-09 (15%, stratified)',
                 'test': '2022-10 to 2022-11'
             },
             'statistics': stats,
@@ -242,10 +263,12 @@ def main():
     print("=" * 60)
 
     train_files = list((target_dir / 'train').glob('*.jpg'))
+    val_files = list((target_dir / 'val').glob('*.jpg'))
     test_files = list((target_dir / 'test').glob('*.jpg'))
 
     print(f"\nFiles created:")
     print(f"  Train: {len(train_files)} images")
+    print(f"  Val:   {len(val_files)} images")
     print(f"  Test:  {len(test_files)} images")
 
     print(f"\nLabels created:")
@@ -254,16 +277,16 @@ def main():
 
     # Check balance
     print(f"\nClass Balance:")
-    for split in ['train', 'test']:
+    for split in ['train', 'val', 'test']:
         s = stats[split]
         if s['total'] > 0:
             danger_ratio = s['danger'] / s['total']
             safe_ratio = s['safe'] / s['total']
 
             if abs(danger_ratio - 0.5) < 0.1:
-                balance = "✅ Balanced"
+                balance = "Balanced"
             else:
-                balance = "⚠️  Imbalanced"
+                balance = "Imbalanced"
 
             print(f"  {split.capitalize():5s}: {balance} "
                   f"(Danger: {danger_ratio*100:.1f}%, Safe: {safe_ratio*100:.1f}%)")

@@ -298,10 +298,72 @@ class MultiModelAnalyzer:
         plt.close()
     
     def _create_correlation_heatmap(self):
-        """Create correlation heatmap of model predictions."""
-        # This would require storing individual predictions
-        # Placeholder for now
-        pass
+        """Create correlation heatmap of model predictions.
+
+        Loads per-image predictions from scenario results and computes
+        pairwise prediction score correlations between models.
+        """
+        results_base = os.path.join(os.path.dirname(self.output_dir), "scenario")
+
+        model_predictions = {}
+        for model in self.model_types:
+            result_path = os.path.join(results_base, f"{model}_2layer", "results.json")
+            if not os.path.exists(result_path):
+                result_path = os.path.join(results_base, model, "results.json")
+            if not os.path.exists(result_path):
+                continue
+
+            with open(result_path) as f:
+                data = json.load(f)
+
+            preds = data.get("per_image_predictions", {})
+            if preds:
+                model_predictions[model] = preds
+
+        if len(model_predictions) < 2:
+            logger.warning("Not enough models with per-image predictions for correlation heatmap")
+            return
+
+        common_images = set.intersection(*[set(p.keys()) for p in model_predictions.values()])
+        if not common_images:
+            logger.warning("No common images found across models")
+            return
+
+        common_images = sorted(common_images)
+
+        score_matrix = {}
+        for model, preds in model_predictions.items():
+            score_matrix[model] = [preds[img]["pred_score"] for img in common_images]
+
+        df = pd.DataFrame(score_matrix)
+        corr = df.corr(method="pearson")
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        sns.heatmap(
+            corr, annot=True, fmt=".4f", cmap="RdYlBu_r",
+            vmin=0.5, vmax=1.0, square=True,
+            xticklabels=corr.columns, yticklabels=corr.columns,
+            ax=ax
+        )
+        ax.set_title("Model Prediction Score Correlation (Pearson)")
+
+        plt.tight_layout()
+        plt.savefig(
+            os.path.join(self.output_dir, "correlation_heatmap.png"),
+            dpi=300, bbox_inches='tight'
+        )
+        plt.close()
+
+        corr_path = os.path.join(self.output_dir, "prediction_correlations.json")
+        with open(corr_path, 'w') as f:
+            json.dump({
+                "method": "pearson",
+                "n_images": len(common_images),
+                "correlation_matrix": corr.to_dict(),
+                "models": list(model_predictions.keys())
+            }, f, indent=2)
+
+        logger.info(f"Correlation heatmap saved ({len(common_images)} images, {len(model_predictions)} models)")
     
     def _save_results(self):
         """Save analysis results."""

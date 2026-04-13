@@ -209,7 +209,7 @@ def main():
     print("\n[Validation]")
 
     # Check 1: Total count matches
-    expected_total = sum(stats['per_category'].values(), key=lambda x: x['count'])
+    expected_total = sum(v['count'] for v in stats['per_category'].values())
     if stats['total'] == len(labels_5d):
         print("  ✅ Total count matches")
     else:

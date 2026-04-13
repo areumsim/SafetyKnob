@@ -1,7 +1,7 @@
 # SafetyKnob — 프로젝트 현황 및 실행 계획
 
-**최종 업데이트**: 2025-11-28
-**프로젝트 단계**: Stage 1 완료, Stage 2 부분 완료, Stage 3 계획 중
+**최종 업데이트**: 2026-03-24
+**프로젝트 단계**: Stage 1 완료, Stage 2 보완 실험 완료, Stage 3 (Domain Adaptation) 계획 중
 
 ---
 
@@ -13,9 +13,9 @@
 - 이진 분류를 넘어 5차원 안전 평가(낙상/충돌/장비/환경/보호구)로 설명 가능성 제공
 
 ### 핵심 연구 질문
-- **RQ1**: 사전학습 임베딩 공간에서 안전/위험이 선형 분리 가능한가? → ✅ **입증됨** (95.73% F1)
-- **RQ2**: 다중 모델 앙상블이 distribution shift에 강건한가? → ❌ **실패** (Temporal split에서 미검증)
-- **RQ3**: 5차원 독립 학습이 전체 안전성 예측을 향상시키는가? → ⚠️ **부분 성공** (Overall 유지, 차원 간 불균형 존재)
+- **RQ1**: 사전학습 임베딩이 경량 probe로 충분한가? → ✅ **입증됨** (2-layer 96.13% F1, 단 linear 80.43%로 비선형 변환 필수)
+- **RQ2**: 다중 모델 앙상블이 distribution shift에 강건한가? → ❌ **실패** (앙상블 < 최고 단일 모델, temporal 28-35%p 하락)
+- **RQ3**: 카테고리별 독립 학습 vs Multi-task → ✅ **독립 학습 우위** (4/5 카테고리에서 부정적 전이 확인)
 
 ### 설계 원칙
 - **구성 우선**(config.json): 모델/체크포인트/차원/임계값/학습 파라미터
@@ -113,19 +113,36 @@
 
 ---
 
+### ✅ 보완 실험 완료 (2026-03-24)
+
+#### 1. 연구 보완 실험 결과
+
+- [x] **ResNet50-Frozen 실험** ✅ (RQ1 공정 비교)
+  - Scenario F1: 78.42%, Temporal F1: 57.33%
+  - SigLIP-Frozen(96.13%) >> ResNet50-Frozen(78.42%): +17.71%p → Foundation model 우위 명확
+
+- [x] **Probe Depth Ablation** ✅ (RQ1 선형 분리 검증)
+  - SigLIP: Linear 80.43% → 1-layer 95.42% → 2-layer 96.13% (gap 15.70%p)
+  - CLIP: Linear 76.63% → 2-layer 91.52% (gap 14.89%p)
+  - DINOv2: Linear 75.19% → 2-layer 90.79% (gap 15.60%p)
+  - **판정**: 비선형 변환 필수 (gap > 5%p). "선형 분리" 주장 수정.
+
+- [x] **Temporal Ensemble 실험** ✅ (RQ2 보완)
+  - Ensemble(avg) Temporal F1: 63.96% < SigLIP 단독 68.08%
+  - Scenario에서도 Ensemble 95.81% < SigLIP 96.13%
+  - **판정**: 앙상블 실패. 에러 상관 0.34-0.44 (다양성 부족).
+
+- [x] **카테고리별 Independent vs Multi-task** ✅ (RQ3 검증)
+  - 4/5 카테고리에서 독립 학습 우위 (Fall -17.69%p, Equipment -15.78%p)
+  - **판정**: 부정적 전이 확인. 1이미지=1라벨 구조적 한계.
+
 ### ❌ 미완료/차단된 작업
 
-#### 1. RQ2 완전 검증 (앙상블의 강건성)
-- [ ] **Temporal split에서 앙상블 실험** (Critical)
-  - 현재 상태: 단일 모델도 60-67% F1로 실패
-  - 필요 작업: Domain adaptation 후 앙상블 재시도
-  - 차단 이유: 모든 모델이 temporal shift에서 성능 급락
-
-#### 2. Real-world Deployment
+#### 1. Real-world Deployment
 - [ ] **Distribution shift 대응** (Blocker)
   - 현재 상태: 30%p 성능 하락으로 배포 불가
-  - 필요 작업: Domain adaptation 기법 적용
-  - 우선순위: **최고 우선순위**
+  - 필요 작업: Domain adaptation 기법 적용 (DANN 실험 진행 중)
+  - 우선순위: 현재 연구 scope 밖, limitation으로 서술
 
 ---
 

@@ -21,7 +21,7 @@
 │             ↓               ↓              ↓                   │
 │         SigLIP(1152)    Safety NN      Weighted Vote           │
 │         CLIP(768)       5 Dimensions   Stacking                │
-│         DINOv2(1536)                                           │
+│         DINOv2(1024)                                           │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -73,7 +73,7 @@ export SAFETYKNOB_LOG_LEVEL=DEBUG   # 디버그 로깅
   "models": [
     {"name": "siglip", "model_type": "siglip", "embedding_dim": 1152},
     {"name": "clip", "model_type": "clip", "embedding_dim": 768},
-    {"name": "dinov2", "model_type": "dinov2", "embedding_dim": 1536}
+    {"name": "dinov2", "model_type": "dinov2", "embedding_dim": 1024}
   ],
   "assessment_method": "ensemble",
   "ensemble_strategy": "weighted_vote",
@@ -582,7 +582,7 @@ CMD ["python", "main.py", "serve", "--host", "0.0.0.0", "--port", "8000"]
 
 ## 알려진 이슈 및 해결 중인 문제
 
-현재 프로젝트의 알려진 이슈와 개선 계획은 [TODO.md](../TODO.md)를 참조하세요.
+현재 프로젝트의 알려진 이슈와 개선 계획은 [TODO_ko.md](../TODO_ko.md)를 참조하세요.
 
 **주요 이슈**:
 - Config threshold 미적용 (코드에서 하드코딩된 0.5 사용)
@@ -590,7 +590,7 @@ CMD ["python", "main.py", "serve", "--host", "0.0.0.0", "--port", "8000"]
 - Per-model device 설정 미지원
 - API 파일 처리 보안 개선 필요
 
-자세한 내용과 해결 계획은 [TODO.md - High Priority](../TODO.md#high-priority)를 참조하세요.
+자세한 내용과 해결 계획은 [TODO_ko.md](../TODO_ko.md)를 참조하세요.
 
 ## 기여 가이드라인
 
@@ -617,4 +617,4 @@ CMD ["python", "main.py", "serve", "--host", "0.0.0.0", "--port", "8000"]
 - **실험 수행**: [EXPERIMENT_PROTOCOL.md](EXPERIMENT_PROTOCOL.md) → 현재 문서(DEVELOPMENT.md)
 - **API 사용**: [API_REFERENCE.md](API_REFERENCE.md)
 - **코드 구조**: [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)
-- **개선 계획**: [TODO.md](../TODO.md)
+- **개선 계획**: [TODO_ko.md](../TODO_ko.md)

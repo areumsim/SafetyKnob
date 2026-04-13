@@ -71,31 +71,89 @@ class DINOv2Embedder:
 
 # ========== Binary Classifier (Simplified) ==========
 class BinarySafetyClassifier(nn.Module):
-    """Binary-only safety classifier (no dimension heads)"""
+    """Binary-only safety classifier (no dimension heads)
 
-    def __init__(self, embedding_dim, hidden_dim=512):
+    Args:
+        embedding_dim: Input embedding dimension
+        hidden_dim: Hidden layer dimension (used for 1layer and 2layer)
+        probe_depth: 'linear' (true linear probe), '1layer' (1 hidden),
+                     '2layer' (2 hidden, default/original)
+    """
+
+    def __init__(self, embedding_dim, hidden_dim=512, probe_depth='2layer'):
         super().__init__()
+        self.probe_depth = probe_depth
 
-        # Feature extractor
-        self.feature_extractor = nn.Sequential(
-            nn.Linear(embedding_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.3)
-        )
-
-        # Binary safety head
-        self.safety_head = nn.Sequential(
-            nn.Linear(hidden_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 1),
-            nn.Sigmoid()
-        )
+        if probe_depth == 'linear':
+            # True linear probe: embedding -> 1, no hidden layers
+            self.classifier = nn.Sequential(
+                nn.Linear(embedding_dim, 1),
+                nn.Sigmoid()
+            )
+        elif probe_depth == '1layer':
+            # 1 hidden layer: embedding -> hidden_dim -> 1
+            self.classifier = nn.Sequential(
+                nn.Linear(embedding_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(hidden_dim, 1),
+                nn.Sigmoid()
+            )
+        elif probe_depth == '2layer':
+            # 2 hidden layers: embedding -> hidden_dim -> 128 -> 1 (original)
+            self.classifier = nn.Sequential(
+                nn.Linear(embedding_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(hidden_dim, 128),
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(128, 1),
+                nn.Sigmoid()
+            )
+        else:
+            raise ValueError(f"Unknown probe_depth: {probe_depth}. Use 'linear', '1layer', or '2layer'.")
 
     def forward(self, x):
-        features = self.feature_extractor(x)
-        overall_safety = self.safety_head(features).squeeze()
-        return overall_safety
+        return self.classifier(x).squeeze()
+
+    @staticmethod
+    def load_checkpoint_compat(state_dict, probe_depth='2layer'):
+        """Convert old-format state dict keys to new format if needed.
+
+        Old format: feature_extractor.0.* + safety_head.{0,3}.* (2layer only)
+        New format: classifier.{0,3,6}.* (2layer) or classifier.{0,3}.* (1layer)
+                    or classifier.0.* (linear)
+        """
+        # Check if already in new format
+        if any(k.startswith('classifier.') for k in state_dict):
+            return state_dict
+
+        # Old format detected — convert based on probe_depth
+        new_state_dict = {}
+
+        if probe_depth == '2layer':
+            key_map = {
+                'feature_extractor.0.weight': 'classifier.0.weight',
+                'feature_extractor.0.bias': 'classifier.0.bias',
+                'safety_head.0.weight': 'classifier.3.weight',
+                'safety_head.0.bias': 'classifier.3.bias',
+                'safety_head.3.weight': 'classifier.6.weight',
+                'safety_head.3.bias': 'classifier.6.bias',
+            }
+        else:
+            raise ValueError(
+                f"Old-format checkpoints only support probe_depth='2layer', "
+                f"got '{probe_depth}'"
+            )
+
+        for old_key, new_key in key_map.items():
+            if old_key in state_dict:
+                new_state_dict[new_key] = state_dict[old_key]
+            else:
+                raise KeyError(f"Expected key '{old_key}' in old-format checkpoint")
+
+        return new_state_dict
 
 
 # ========== Dataset ==========
@@ -205,7 +263,7 @@ def main():
     parser.add_argument('--model', type=str, required=True,
                        choices=['siglip', 'clip', 'dinov2'],
                        help='Model to train')
-    parser.add_argument('--data-dir', type=str, default='/workspace/arsim/EmoKnob/data',
+    parser.add_argument('--data-dir', type=str, default='data',
                        help='Data directory')
     parser.add_argument('--output', type=str, required=True,
                        help='Output directory for checkpoints and results')
@@ -215,6 +273,15 @@ def main():
                        help='Batch size')
     parser.add_argument('--lr', type=float, default=1e-3,
                        help='Learning rate')
+    parser.add_argument('--probe-depth', type=str, default='2layer',
+                       choices=['linear', '1layer', '2layer'],
+                       help='Probe head depth: linear (true linear probe), '
+                            '1layer (1 hidden), 2layer (2 hidden, default)')
+    parser.add_argument('--category', type=str, default=None,
+                       choices=['A', 'B', 'C', 'D', 'E'],
+                       help='Filter images by category code (A=fall, B=collision, '
+                            'C=equipment, D=environment, E=PPE) for independent '
+                            'dimension training. Uses overall_safety as target.')
     parser.add_argument('--seed', type=int, default=42,
                        help='Random seed')
 
@@ -233,6 +300,10 @@ def main():
     print(f"Data: {args.data_dir}")
     print(f"Output: {output_path}")
     print(f"Epochs: {args.epochs}, Batch: {args.batch_size}, LR: {args.lr}")
+    if args.category:
+        cat_names = {'A': 'fall_hazard', 'B': 'collision_risk', 'C': 'equipment_hazard',
+                     'D': 'environmental_risk', 'E': 'protective_gear'}
+        print(f"Category filter: {args.category} ({cat_names[args.category]})")
 
     # Load labels
     data_path = Path(args.data_dir)
@@ -246,6 +317,15 @@ def main():
     train_labels = {k.replace('train/', ''): v for k, v in all_labels.items() if k.startswith('train/')}
     val_labels = {k.replace('val/', ''): v for k, v in all_labels.items() if k.startswith('val/')}
     test_labels = {k.replace('test/', ''): v for k, v in all_labels.items() if k.startswith('test/')}
+
+    # Filter by category if specified
+    if args.category:
+        def filter_by_category(labels_dict, cat_code):
+            return {k: v for k, v in labels_dict.items()
+                    if len(k.split('_')) >= 2 and k.split('_')[1][0] == cat_code}
+        train_labels = filter_by_category(train_labels, args.category)
+        val_labels = filter_by_category(val_labels, args.category)
+        test_labels = filter_by_category(test_labels, args.category)
 
     print(f"  Train: {len(train_labels)} images")
     print(f"  Val:   {len(val_labels)} images")
@@ -282,8 +362,12 @@ def main():
     print(f"✓ Embedder loaded (embedding_dim={embedder.embedding_dim})")
 
     # Create model
-    print(f"\nCreating binary classifier...")
-    model = BinarySafetyClassifier(embedding_dim=embedder.embedding_dim, hidden_dim=512)
+    print(f"\nCreating binary classifier (probe_depth={args.probe_depth})...")
+    model = BinarySafetyClassifier(
+        embedding_dim=embedder.embedding_dim,
+        hidden_dim=512,
+        probe_depth=args.probe_depth
+    )
     model = model.to(device)
 
     total_params = sum(p.numel() for p in model.parameters())
@@ -323,7 +407,9 @@ def main():
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'val_f1': best_val_f1,
-                'val_metrics': val_metrics
+                'val_metrics': val_metrics,
+                'probe_depth': args.probe_depth,
+                'embedding_dim': embedder.embedding_dim,
             }, output_path / 'best_model.pt')
 
             print(f"  ✓ Saved best model (F1: {best_val_f1:.4f})")
@@ -352,11 +438,17 @@ def main():
     print(f"  AUC-ROC:   {test_metrics['auc_roc']*100:.2f}%")
 
     # Save results
+    cat_names = {'A': 'fall_hazard', 'B': 'collision_risk', 'C': 'equipment_hazard',
+                 'D': 'environmental_risk', 'E': 'protective_gear'}
     results = {
         'model': args.model,
         'dataset': 'danger_al',
         'task': 'binary_classification',
+        'category': args.category,
+        'category_name': cat_names.get(args.category) if args.category else None,
         'embedding_dim': embedder.embedding_dim,
+        'probe_depth': args.probe_depth,
+        'total_parameters': total_params,
         'training_time_seconds': training_time,
         'epochs_trained': epoch + 1,
         'best_val_f1': float(best_val_f1),
@@ -365,6 +457,7 @@ def main():
             'batch_size': args.batch_size,
             'learning_rate': args.lr,
             'hidden_dim': 512,
+            'probe_depth': args.probe_depth,
             'optimizer': 'AdamW',
             'scheduler': 'CosineAnnealingLR'
         }

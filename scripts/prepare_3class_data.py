@@ -183,10 +183,10 @@ def copy_images_and_create_labels(images: List[Tuple[Path, str]],
 def main():
     parser = argparse.ArgumentParser(description='Prepare 3-class data for SafetyKnob')
     parser.add_argument('--source', type=str,
-                       default='/workspace/data1/arsim/danger_al',
+                       default='data/raw/danger_al',
                        help='Source directory with danger/safe/caution folders')
     parser.add_argument('--output', type=str,
-                       default='/workspace/arsim/EmoKnob/data',
+                       default='data',
                        help='Output directory')
     parser.add_argument('--seed', type=int, default=42,
                        help='Random seed for reproducibility')

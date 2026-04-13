@@ -139,11 +139,29 @@ With margin γ: min |w·E(img) + b| > γ  (confidence)
    - If MLP gains < 3% over linear → linear separability holds
    - If MLP gains > 5% → non-linear features important
 
-**Current Evidence** (⚠️ Preliminary Results - Validation in Progress):
-- SigLIP: Linear probe achieved 93.2% accuracy (preliminary test)
-- 2-layer MLP achieved 93.8% (+0.6%)
-- **Status**: **Under investigation** - Full experiments with larger test set ongoing
-- **Preliminary Conclusion**: Mostly linearly separable, but slight non-linearity helps
+**Corrected Results** (Scenario_v2 sequence-level split, Test Set n=2,203, 5-seed mean±std):
+
+> **⚠ 2026-04-06**: 이전 결과(아래 취소선)는 frame-level split 데이터 누출로 무효화.
+> 상세: `results/CRITICAL_FINDING_SCENARIO_LEAKAGE.md`
+
+| Model | Linear F1 | 1-Layer F1 | 2-Layer F1 | 3-Layer F1 |
+|-------|-----------|------------|------------|------------|
+| SigLIP | 76.81±0.28% | **87.16±0.26%** | 87.28±0.45% | 86.81±0.94% |
+| CLIP | 71.66±0.41% | **79.02±0.71%** | 78.91±0.48% | - |
+| DINOv2 | 68.97±1.02% | **78.54±0.68%** | 77.94±0.46% | - |
+| ~~ResNet50-Frozen~~ | ~~-~~ | ~~-~~ | ~~78.42% (old split)~~ | - |
+
+~~Old (leaked) results: SigLIP 96.11%, CLIP 91.54%, DINOv2 90.92%~~
+
+**Revised Verdict**: Linear→1-layer gap = 10.35%p → **Non-linear transformation essential (1 layer)**.
+1-layer→2-layer gap = 0.12%p → **No benefit from additional depth**. 3-layer → overfitting (-0.47%p).
+**Optimal architecture: 1-layer MLP (591K params)**.
+
+**Revised Claim**: "Foundation model features require exactly one non-linear transformation. A 1-layer MLP (591K params) achieves equivalent performance to deeper probes while avoiding overfitting."
+
+**Foundation Model Superiority**: SigLIP-Frozen (87.28%, 656K) likely still > ResNet50-Frozen (78.42% on old split — scenario_v2 retest needed). ResNet50-Finetuned comparison requires re-experiment on clean split.
+
+**Data Scaling**: With only 25% of training data (2,543 images), SigLIP achieves 88.94±0.46% F1 — practical for data-scarce domains.
 
 ### 2.2 Core Hypothesis 2: Ensemble Robustness
 
@@ -179,15 +197,37 @@ With margin γ: min |w·E(img) + b| > γ  (confidence)
    - Test on SO-43 to SO-47 (unseen equipment types)
    - Hypothesis: Ensemble gap widens under distribution shift
 
-**Expected Results** (⚠️ Preliminary - Under Investigation):
-```
-              In-distribution    Out-of-distribution
-SigLIP        93.2%             TBD
-CLIP          90.8%             TBD
-DINOv2        88.4%             TBD
-Ensemble      95.4%             TBD  ← Hypothesis: Smaller drop
-```
-**Note**: In-distribution results from preliminary tests. Out-of-distribution experiments ongoing.
+**Supplementary Experiment Results** (completed 2026-03, 5-seed mean±std):
+
+| Model | Scenario F1 | Temporal F1 | Delta |
+|-------|------------|------------|-------|
+| SigLIP (2-layer) | 87.28±0.45% (scenario_v2) | 66.11±0.72% | -21.17%p |
+| CLIP (2-layer) | 91.54±0.49% | 60.72±0.51% | -30.81%p |
+| DINOv2 (2-layer) | 90.92±0.42% | 56.65±0.83% | -34.27%p |
+| **Ensemble (avg)** | 95.88±0.21% | 63.96% | -31.92%p |
+| ResNet50-Frozen | 78.42% | 57.33% | -21.09%p |
+| DANN Clean (SigLIP) | 96.40±0.22% | 65.28±0.88% | -0.83%p |
+| **LoRA (SigLIP, r=16)** | ~98% (val) | **77.77±1.02%** | **+11.59%p** |
+
+**Error Correlation** (Temporal Test Set, n=5,119):
+- corr(SigLIP, CLIP) = 0.4382
+- corr(SigLIP, DINOv2) = 0.3369
+- corr(CLIP, DINOv2) = 0.3891
+- All correct: 39.0%, All wrong: 17.1%
+
+**Ensemble 2-model Ablation** (Scenario, 5-seed):
+- SigLIP+DINOv2: 97.11±0.12% (best pair, +1.00%p over single SigLIP)
+- SigLIP+CLIP: 96.66±0.20%
+- Full 3-model: 95.88±0.21% (adding CLIP hurts)
+
+**Verdict**: **Original hypothesis rejected. Temporal shift remains an open challenge.**
+- Ensemble < best single model on both splits
+- Error correlations (0.34-0.44) are moderate — some diversity exists but insufficient for full ensemble gain
+- **SigLIP+DINOv2 pair does outperform single SigLIP** — selective 2-model ensemble works
+- All approaches collapse under temporal shift (28-35%p)
+- **DANN provides NO improvement on clean splits** (-0.83%p). Domain discriminator converges to random (~0.693 loss)
+- **LoRA recovers 38.7% of the gap** (66→78%), confirming backbone modification is necessary
+- Root cause: feature-level distribution shift from seasonal visual changes (lighting, weather, vegetation)
 
 ### 2.3 Core Hypothesis 3: Dimension Independence
 
@@ -228,12 +268,44 @@ Overall safety: S = Σ w_i · g_i(e)  (weighted combination)
 3. **Per-dimension AUC**: Each dimension should achieve AUC > 0.90
    - If any dimension has AUC < 0.80 → poorly defined or insufficient data
 
-**Current Evidence** (⚠️ Under Investigation):
-- **Status**: Correlation analysis and ablation studies in progress
-- **Hypothesis**: Dimension correlation matrix should show 0.3 < ρ < 0.6 → moderate independence
-- **Expected**: Fall and PPE most critical (highest ablation impact)
-- **Expected**: Environmental risk lowest correlation with others → truly independent
-- **Timeline**: Full results expected after completing experiments on all scenarios
+**Supplementary Experiment Results** (SigLIP, 2-layer probe, Scenario Split, 5-seed mean±std for Independent):
+
+| Dimension | Independent F1 | Multi-task F1 | Delta | Transfer |
+|-----------|---------------|--------------|-------|----------|
+| Fall Hazard (A) | 95.23±0.25% | 76.54% | -18.69%p | Negative |
+| Collision Risk (B) | 98.24±0.27% | 98.24% | ±0.00%p | Neutral |
+| Equipment Hazard (C) | 93.10±0.61% | 75.69% | -17.41%p | Negative |
+| Environmental Risk (D) | 96.06±0.23% | 94.74% | -1.32%p | Negative |
+| Protective Gear (E) | 98.00±0.19% | 90.50% | -7.50%p | Negative |
+
+**Verdict**: **Multi-task hurts 4 of 5 dimensions.** Shared feature extractor causes significant
+negative transfer for Fall Hazard (-18.69%p) and Equipment Hazard (-17.41%p). Results are
+statistically robust (all std < 0.61%p).
+
+**Critical Data Limitation — Label Design Flaw**:
+
+Each image has only 1 dimension annotated as active (from filename category code A-E).
+Other dimensions are set to 0.9 ("not applicable"). This creates a fundamental structural problem:
+
+1. **NOT true multi-label classification**: The dataset does not annotate whether a Fall image also
+   contains Collision or Equipment hazards. A construction worker at height (Fall=unsafe) near heavy
+   machinery (Collision=?) with no helmet (PPE=?) only receives Fall annotation.
+
+2. **Multi-task failure is structurally predetermined**: When training a shared backbone with 5 heads,
+   4 out of 5 heads always receive "not applicable" labels, providing no useful gradient signal.
+   The backbone is pulled in conflicting directions, causing negative transfer.
+
+3. **Why Collision benefits (+1.02%p)**: Collision Risk (B) has the largest data share in the dataset.
+   The shared backbone becomes biased toward Collision-friendly features, benefiting this category
+   at the expense of smaller categories like Fall and Equipment.
+
+4. **Correct terminology**: "Category-specific binary classification" — NOT "multi-dimensional
+   safety assessment." Each category is an independent safe/unsafe binary task, not a dimension
+   of a multi-dimensional evaluation.
+
+**Revised Claim**: Independent per-dimension classifiers are preferable to shared multi-task
+architecture for this label structure. True multi-dimensional assessment requires genuine
+multi-label annotations where each image is annotated across all 5 dimensions simultaneously.
 
 ---
 
@@ -548,13 +620,13 @@ print(f"Safe: {similarity[0][0]:.2%}, Unsafe: {similarity[0][1]:.2%}")
 #### DINOv2 (Meta, 2023)
 - **Innovation**: Self-supervised learning with self-distillation
 - **Advantage**: Best spatial understanding and dense features (no text alignment needed)
-- **Embedding Dimension**: 1536-d (ViT-g/14, giant model)
+- **Embedding Dimension**: 1024-d (ViT-L/14, large model)
 - **Rationale for Safety**: Critical for spatial hazards (person-to-edge distance, equipment proximity). Self-supervised training on diverse data gives robust geometric understanding.
 
-**Why Giant Model?**:
-- Height estimation requires fine-grained spatial reasoning
-- Collision risk needs precise localization
-- Accept slower inference (91ms) for better spatial accuracy
+**Why Large Model?**:
+- Sufficient spatial reasoning capacity for safety assessment
+- Good balance between inference speed and spatial accuracy
+- 1024-d embeddings provide rich feature representation
 
 #### Rejected Models and Why
 

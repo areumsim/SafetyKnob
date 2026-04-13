@@ -4,7 +4,7 @@
     "description": "Industrial image safety assessment using pre-trained vision models",
     "version": "1.0.0"
   },
-  
+
   "models": [
     {
       "name": "siglip",
@@ -13,12 +13,28 @@
       "embedding_dim": 1152,
       "device": "cuda",
       "cache_dir": "./data/cache/siglip"
+    },
+    {
+      "name": "clip",
+      "model_type": "clip",
+      "checkpoint": "openai/clip-vit-large-patch14",
+      "embedding_dim": 768,
+      "device": "cuda",
+      "cache_dir": "./data/cache/clip"
+    },
+    {
+      "name": "dinov2",
+      "model_type": "dinov2",
+      "checkpoint": "facebook/dinov2-large",
+      "embedding_dim": 1024,
+      "device": "cuda",
+      "cache_dir": "./data/cache/dinov2"
     }
   ],
-  
+
   "assessment_method": "ensemble",
   "ensemble_strategy": "weighted_vote",
-  
+
   "safety": {
     "dimensions": {
       "fall_hazard": {
@@ -43,22 +59,35 @@
       }
     },
     "safety_threshold": 0.5,
-    "confidence_threshold": 0.7,
-    
-    "_comment": "안전성 차원을 추가하거나 변경하려면 dimensions에 새 항목을 추가하세요",
-    "_example_custom_dimensions": {
-      "fire_hazard": {
-        "weight": 1.2,
-        "description": "화재 위험"
-      },
-      "chemical_exposure": {
-        "weight": 1.0,
-        "description": "화학물질 노출"
-      },
-      "electrical_hazard": {
-        "weight": 0.9,
-        "description": "전기 위험"
-      }
-    }
-  }
+    "confidence_threshold": 0.7
+  },
+
+  "training": {
+    "batch_size": 32,
+    "learning_rate": 0.001,
+    "epochs": 20,
+    "optimizer": "adam",
+    "scheduler": "cosine",
+    "early_stopping_patience": 5,
+    "weight_decay": 0.0001
+  },
+
+  "data": {
+    "train_dir": "./data/train",
+    "val_dir": "./data/val",
+    "test_dir": "./data/test",
+    "labels_file": "./data/labels.json",
+    "augmentation": true,
+    "num_workers": 4,
+    "image_size": 224
+  },
+
+  "results_dir": "./results",
+  "checkpoint_dir": "./checkpoints",
+  "log_dir": "./logs",
+  "save_embeddings": true,
+
+  "api_host": "0.0.0.0",
+  "api_port": 8000,
+  "api_workers": 1
 }

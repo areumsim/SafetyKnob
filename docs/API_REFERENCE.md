@@ -131,8 +131,8 @@ GET /api/v1/models
     {
       "name": "dinov2",
       "model_type": "dinov2",
-      "checkpoint": "facebook/dinov2-giant",
-      "embedding_dim": 1536,
+      "checkpoint": "facebook/dinov2-large",
+      "embedding_dim": 1024,
       "device": "cuda",
       "status": "loaded"
     }

@@ -90,7 +90,7 @@ class DINOEmbedder(BaseEmbedder):
         super().__init__(device, cache_path)
         from transformers import AutoImageProcessor, Dinov2Model, AutoModel
 
-        self.model_name = checkpoint or "facebook/dinov2-giant"  # "facebook/dinov2-base"
+        self.model_name = checkpoint or "facebook/dinov2-large"
         self.processor = AutoImageProcessor.from_pretrained(self.model_name)
         self.model = Dinov2Model.from_pretrained(self.model_name).to(self.device).eval()
         # self.model = AutoModel.from_pretrained(self.model_name).to(self.device).eval()

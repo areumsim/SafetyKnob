@@ -215,7 +215,7 @@ def main():
     parser.add_argument('--model', type=str, required=True,
                        choices=['siglip', 'clip', 'dinov2', 'all'],
                        help='Model to evaluate (or "all")')
-    parser.add_argument('--data-dir', type=str, default='/workspace/arsim/EmoKnob/data_scenario',
+    parser.add_argument('--data-dir', type=str, default='data_scenario',
                        help='Scenario-based data directory')
     parser.add_argument('--checkpoint-dir', type=str, default='results/danger_al',
                        help='Directory containing trained model checkpoints')
